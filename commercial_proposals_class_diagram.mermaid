@@ -1,0 +1,244 @@
+classDiagram
+    %% Core System Classes
+    class System {
+        -tenants: Map<String, Tenant>
+        +initialize()
+        +registerTenant(tenant: Tenant)
+        +getTenant(tenantId: String): Tenant
+    }
+
+    %% Multi-tenant Architecture
+    class Tenant {
+        -id: String
+        -name: String
+        -schema: String
+        -config: TenantConfig
+        -users: User[]
+        -roles: Role[]
+        +getId(): String
+        +getSchema(): String
+        +getConfig(): TenantConfig
+        +addUser(user: User)
+        +removeUser(userId: String)
+    }
+
+    class TenantConfig {
+        -logoUrl: String
+        -primaryColor: String
+        -features: Map<String, Boolean>
+        -subscriptionPlan: String
+        +isFeatureEnabled(feature: String): Boolean
+    }
+
+    %% Authentication & Authorization
+    class User {
+        -id: String
+        -email: String
+        -password: String(hashed)
+        -firstName: String
+        -lastName: String
+        -roles: Role[]
+        -tenantId: String
+        -active: Boolean
+        -lastLogin: Date
+        +authenticate(password: String): Boolean
+        +hasPermission(permission: String): Boolean
+        +assignRole(role: Role)
+        +removeRole(roleId: String)
+    }
+
+    class Role {
+        -id: String
+        -name: String
+        -permissions: Permission[]
+        +hasPermission(permissionId: String): Boolean
+        +addPermission(permission: Permission)
+        +removePermission(permissionId: String)
+    }
+
+    class Permission {
+        -id: String
+        -name: String
+        -description: String
+    }
+
+    %% Core Business Objects
+    class Proposal {
+        -id: String
+        -title: String
+        -clientId: String
+        -createdBy: String
+        -createdAt: Date
+        -updatedAt: Date
+        -sections: Section[]
+        -status: ProposalStatus
+        -validUntil: Date
+        -value: Number
+        -approvedBy: String
+        -approvedAt: Date
+        -template: Boolean
+        +calculateTotal(): Number
+        +generatePDF(): Buffer
+        +approve(approverId: String)
+        +reject(reason: String)
+        +archive()
+    }
+
+    class Section {
+        -id: String
+        -title: String
+        -content: String
+        -order: Number
+        -items: Item[]
+        +addItem(item: Item)
+        +removeItem(itemId: String)
+        +calculateSubtotal(): Number
+    }
+
+    class Item {
+        -id: String
+        -description: String
+        -quantity: Number
+        -unitPrice: Number
+        -discount: Number
+        -tax: Number
+        +calculateTotal(): Number
+    }
+
+    class Client {
+        -id: String
+        -name: String
+        -email: String
+        -phone: String
+        -address: Address
+        -contactPerson: String
+        -tenantId: String
+        -proposals: Proposal[]
+        +addProposal(proposal: Proposal)
+    }
+
+    class Address {
+        -street: String
+        -city: String
+        -state: String
+        -zipCode: String
+        -country: String
+    }
+
+    %% Enumerations as classes
+    class ProposalStatus {
+        <<enumeration>>
+        DRAFT
+        PENDING_APPROVAL
+        APPROVED
+        SENT
+        REJECTED
+        ACCEPTED
+        EXPIRED
+        ARCHIVED
+    }
+
+    %% Backend Services
+    class AuthService {
+        +login(email: String, password: String): AuthToken
+        +logout(token: String): void
+        +refreshToken(token: String): AuthToken
+        +validateToken(token: String): Boolean
+        +resetPassword(email: String): void
+    }
+
+    class ProposalService {
+        +createProposal(data: ProposalData): Proposal
+        +getProposal(id: String): Proposal
+        +updateProposal(id: String, data: ProposalData): Proposal
+        +deleteProposal(id: String): Boolean
+        +listProposals(filters: Object): Proposal[]
+        +generatePDF(proposalId: String): Buffer
+        +sendProposal(proposalId: String, email: String): Boolean
+    }
+
+    class ClientService {
+        +createClient(data: ClientData): Client
+        +getClient(id: String): Client
+        +updateClient(id: String, data: ClientData): Client
+        +deleteClient(id: String): Boolean
+        +listClients(filters: Object): Client[]
+        +searchClients(query: String): Client[]
+    }
+
+    class AnalyticsService {
+        +getProposalStats(filters: Object): Stats
+        +getRevenueStats(period: String): Stats
+        +getConversionRate(filters: Object): Number
+        +getTopPerformers(count: Number): User[]
+    }
+
+    %% Frontend Components
+    class App {
+        -auth: AuthState
+        -router: Router
+        +render()
+        +initialize()
+    }
+
+    class AuthProvider {
+        -user: User
+        -loading: Boolean
+        -error: String
+        +login(credentials: Object): Promise
+        +logout(): Promise
+        +getUser(): User
+    }
+
+    class ProposalList {
+        -proposals: Proposal[]
+        -loading: Boolean
+        -filters: Object
+        +loadProposals()
+        +filterProposals(filters: Object)
+        +render()
+    }
+
+    class ProposalEditor {
+        -proposal: Proposal
+        -errors: Object
+        -saving: Boolean
+        +loadProposal(id: String)
+        +saveProposal(): Promise
+        +addSection()
+        +addItem(sectionId: String)
+        +render()
+    }
+
+    class Dashboard {
+        -stats: Stats
+        -period: String
+        +loadStats()
+        +changePeriod(period: String)
+        +render()
+    }
+
+    %% Relationships
+    System "1" *-- "*" Tenant
+    Tenant "1" *-- "*" User
+    Tenant "1" *-- "*" Role
+    Tenant "1" *-- "*" Client
+    Tenant "1" *-- "1" TenantConfig
+    User "*" -- "*" Role
+    Role "1" *-- "*" Permission
+    Proposal "1" *-- "*" Section
+    Section "1" *-- "*" Item
+    Client "1" *-- "*" Proposal
+    Client "1" *-- "1" Address
+    Proposal -- ProposalStatus
+    
+    %% Service Dependencies
+    App *-- AuthProvider
+    App *-- ProposalList
+    App *-- ProposalEditor
+    App *-- Dashboard
+    AuthProvider -- AuthService
+    ProposalList -- ProposalService
+    ProposalEditor -- ProposalService
+    ProposalEditor -- ClientService
+    Dashboard -- AnalyticsService

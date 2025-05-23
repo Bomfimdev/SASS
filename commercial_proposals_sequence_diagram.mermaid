@@ -1,0 +1,108 @@
+sequenceDiagram
+    %% Main actors
+    participant Browser
+    participant FE as Frontend (React)
+    participant API as Backend API (Express)
+    participant Auth as AuthService
+    participant DB as Database (PostgreSQL)
+    participant Cache as Redis Cache
+
+    %% Authentication Flow
+    Browser->>FE: Load application
+    FE->>API: Request authentication status
+    API->>Auth: Validate JWT token
+    Auth->>DB: Check user & tenant
+    DB-->>Auth: Return user data
+    Auth-->>API: Authentication result
+    API-->>FE: Initialize with user context
+    FE-->>Browser: Render dashboard
+
+    %% User creates a new proposal
+    Browser->>FE: Navigate to "New Proposal"
+    FE->>API: GET /api/clients (load client list)
+    API->>DB: Query clients (tenant-scoped)
+    DB-->>API: Return client data
+    API-->>FE: Client list
+    FE-->>Browser: Render proposal form
+    
+    Browser->>FE: Fill form and submit
+    FE->>API: POST /api/proposals
+    API->>Auth: Verify permissions
+    Auth-->>API: Permission granted
+    API->>DB: Insert proposal with tenant ID
+    DB-->>API: Proposal created
+    API-->>FE: Success response
+    FE-->>Browser: Navigate to proposal details
+
+    %% User edits existing proposal
+    Browser->>FE: Navigate to "Edit Proposal"
+    FE->>API: GET /api/proposals/:id
+    API->>Auth: Verify permissions
+    Auth-->>API: Permission granted
+    API->>DB: Query proposal (tenant-scoped)
+    DB-->>API: Return proposal data
+    API-->>FE: Proposal data
+    FE-->>Browser: Render proposal editor
+    
+    Browser->>FE: Edit and save changes
+    FE->>API: PUT /api/proposals/:id
+    API->>Auth: Verify permissions
+    Auth-->>API: Permission granted
+    API->>DB: Update proposal
+    DB-->>API: Update successful
+    API-->>FE: Success response
+    FE-->>Browser: Show success notification
+
+    %% User generates and sends proposal PDF
+    Browser->>FE: Click "Generate PDF"
+    FE->>API: GET /api/proposals/:id/pdf
+    API->>Auth: Verify permissions
+    Auth-->>API: Permission granted
+    API->>DB: Query proposal with relations
+    DB-->>API: Complete proposal data
+    API->>API: Generate PDF
+    API-->>FE: PDF binary data
+    FE-->>Browser: Download PDF
+    
+    Browser->>FE: Click "Send to Client"
+    FE->>API: POST /api/proposals/:id/send
+    API->>Auth: Verify permissions
+    Auth-->>API: Permission granted
+    API->>DB: Update proposal status
+    DB-->>API: Update successful
+    API->>API: Send email with PDF
+    API-->>FE: Email sent confirmation
+    FE-->>Browser: Show success notification
+
+    %% User views dashboard analytics
+    Browser->>FE: Navigate to "Dashboard"
+    FE->>API: GET /api/analytics/overview
+    API->>Auth: Verify permissions
+    Auth-->>API: Permission granted
+    API->>Cache: Check for cached analytics
+    Cache-->>API: Cache miss
+    API->>DB: Run analytics queries (tenant-scoped)
+    DB-->>API: Analytics data
+    API->>Cache: Store in cache
+    API-->>FE: Analytics results
+    FE-->>Browser: Render dashboard charts
+
+    %% Admin manages users
+    Browser->>FE: Navigate to "User Management"
+    FE->>API: GET /api/users
+    API->>Auth: Verify admin permissions
+    Auth-->>API: Permission granted
+    API->>DB: Query users (tenant-scoped)
+    DB-->>API: User data
+    API-->>FE: User list
+    FE-->>Browser: Render user management
+    
+    Browser->>FE: Create new user
+    FE->>API: POST /api/users
+    API->>Auth: Verify admin permissions
+    Auth-->>API: Permission granted
+    API->>DB: Insert user with tenant ID
+    DB-->>API: User created
+    API->>API: Send welcome email
+    API-->>FE: Success response
+    FE-->>Browser: Show success message
