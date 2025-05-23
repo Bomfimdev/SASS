@@ -1,0 +1,131 @@
+sequenceDiagram
+    participant Client as Cliente Web/Mobile
+    participant API as API Gateway
+    participant Auth as AuthService
+    participant PropCtrl as ProposalController
+    participant PropSvc as ProposalService
+    participant CustSvc as CustomerService
+    participant TempSvc as TemplateService
+    participant PDF as PdfGeneratorService
+    participant Notify as NotificationService
+    participant DB as Database
+    participant Storage as StorageService
+    
+    %% Fluxo de Autenticação
+    Client->>API: POST /api/auth/login (email, password)
+    API->>Auth: authenticate(loginRequest)
+    Auth->>DB: findByEmail(email)
+    DB-->>Auth: User
+    Auth->>Auth: verifyPassword(password, user.passwordHash)
+    Auth->>Auth: generateTokens(user)
+    Auth-->>API: AuthResponse (accessToken, refreshToken)
+    API-->>Client: 200 OK (tokens)
+    
+    %% Fluxo de Criação de Proposta
+    Client->>API: POST /api/proposals (com token JWT)
+    API->>API: validateJWT(token)
+    API->>PropCtrl: createProposal(proposalRequest)
+    PropCtrl->>PropSvc: createProposal(proposalRequest)
+    PropSvc->>CustSvc: getCustomer(customerId)
+    CustSvc->>DB: findById(customerId)
+    DB-->>CustSvc: Customer
+    CustSvc-->>PropSvc: Customer
+    PropSvc->>TempSvc: getTemplate(templateId)
+    TempSvc->>DB: findById(templateId)
+    DB-->>TempSvc: Template
+    TempSvc-->>PropSvc: Template
+    PropSvc->>DB: save(proposal)
+    DB-->>PropSvc: Proposal
+    PropSvc->>DB: saveAll(proposalItems)
+    DB-->>PropSvc: List<ProposalItem>
+    PropSvc-->>PropCtrl: ProposalDTO
+    PropCtrl-->>API: 201 Created (ProposalDTO)
+    API-->>Client: 201 Created (ProposalDTO)
+    
+    %% Fluxo de Envio de Proposta
+    Client->>API: POST /api/proposals/{id}/send
+    API->>API: validateJWT(token)
+    API->>PropCtrl: sendProposal(id, sendRequest)
+    PropCtrl->>PropSvc: sendProposal(id, sendRequest)
+    PropSvc->>DB: findById(id)
+    DB-->>PropSvc: Proposal
+    PropSvc->>PropSvc: generatePublicUrl()
+    PropSvc->>DB: updateStatus(SENT)
+    DB-->>PropSvc: Proposal
+    PropSvc->>PDF: generatePdf(proposal)
+    PDF->>TempSvc: getTemplate(proposal.templateId)
+    TempSvc->>DB: findById(templateId)
+    DB-->>TempSvc: Template
+    TempSvc-->>PDF: Template
+    PDF->>PDF: renderHtmlWithData(template, proposal)
+    PDF->>PDF: convertHtmlToPdf(html)
+    PDF-->>PropSvc: byte[] (PDF)
+    PropSvc->>Storage: uploadFile(pdf)
+    Storage-->>PropSvc: File
+    alt Envio por Email
+        PropSvc->>Notify: sendEmailNotification(proposal, pdf)
+        Notify->>Notify: createEmailMessage(proposal, pdf)
+        Notify->>Notify: sendEmail(message)
+    else Envio por WhatsApp
+        PropSvc->>Notify: sendWhatsAppNotification(proposal, link)
+        Notify->>Notify: createWhatsAppMessage(proposal, link)
+        Notify->>Notify: sendWhatsApp(message)
+    end
+    PropSvc->>DB: saveAction(SENT, proposal)
+    DB-->>PropSvc: Action
+    PropSvc-->>PropCtrl: SendResponse
+    PropCtrl-->>API: 200 OK (SendResponse)
+    API-->>Client: 200 OK (SendResponse)
+    
+    %% Fluxo de Visualização da Proposta (Cliente Final)
+    Client->>API: GET /api/public/proposals/{token}
+    API->>PropCtrl: getPublicProposal(token)
+    PropCtrl->>PropSvc: getProposalByToken(token)
+    PropSvc->>DB: findByPublicToken(token)
+    DB-->>PropSvc: Proposal
+    PropSvc->>PropSvc: recordView(proposal, request)
+    PropSvc->>DB: save(viewEvent)
+    DB-->>PropSvc: ViewEvent
+    PropSvc->>Notify: notifyProposalViewed(proposal)
+    Notify->>Notify: sendNotification(proposal.creatorId)
+    PropSvc->>DB: updateStatus(VIEWED)
+    DB-->>PropSvc: Proposal
+    PropSvc-->>PropCtrl: PublicProposalDTO
+    PropCtrl-->>API: 200 OK (PublicProposalDTO)
+    API-->>Client: 200 OK (PublicProposalDTO)
+    
+    %% Fluxo de Aprovação de Proposta
+    Client->>API: POST /api/public/proposals/{token}/approve
+    API->>PropCtrl: submitApproval(token, approvalRequest)
+    PropCtrl->>PropSvc: approveProposal(token, approvalRequest)
+    PropSvc->>DB: findByPublicToken(token)
+    DB-->>PropSvc: Proposal
+    PropSvc->>DB: updateStatus(ACCEPTED)
+    DB-->>PropSvc: Proposal
+    PropSvc->>DB: saveAction(APPROVED, proposal, data)
+    DB-->>PropSvc: Action
+    PropSvc->>Notify: notifyProposalApproved(proposal)
+    Notify->>Notify: sendNotification(proposal.creatorId)
+    PropSvc-->>PropCtrl: Success
+    PropCtrl-->>API: 200 OK
+    API-->>Client: 200 OK
+    
+    %% Fluxo de Gestão de Assinatura
+    Client->>API: POST /api/subscriptions (upgradeRequest)
+    API->>API: validateJWT(token)
+    API->>SubscriptionController: createSubscription(subscriptionRequest)
+    SubscriptionController->>SubscriptionService: createSubscription(subscriptionRequest)
+    alt Pagamento com Stripe
+        SubscriptionService->>StripeService: createSubscription(account, plan)
+        StripeService-->>SubscriptionService: stripeSubscription
+    else Pagamento com MercadoPago
+        SubscriptionService->>MercadoPagoService: createSubscription(account, plan)
+        MercadoPagoService-->>SubscriptionService: mpSubscription
+    end
+    SubscriptionService->>DB: save(subscription)
+    DB-->>SubscriptionService: Subscription
+    SubscriptionService->>DB: updateAccountPlan(accountId, plan)
+    DB-->>SubscriptionService: Account
+    SubscriptionService-->>SubscriptionController: SubscriptionDTO
+    SubscriptionController-->>API: 201 Created (SubscriptionDTO)
+    API-->>Client: 201 Created (SubscriptionDTO with paymentUrl)
